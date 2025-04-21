@@ -1,43 +1,39 @@
+#include <iostream>
+#include <vector>
+#include <random>
+#include <thread>
+#include <mutex>
 #include <atomic>
-#include <chrono>
-#include <cmath>
 #include <gmp.h>
 #include <gmpxx.h>
-#include <iostream>
-#include <mutex>
-#include <random>
-#include <shared_mutex>
-#include <thread>
+#include <cmath>
+#include <chrono>
 #include <unordered_map>
-#include <vector>
+#include <shared_mutex>
 
-// Специальный класс для использования mpz_class в качестве ключа в
-// unordered_map
+// Специальный класс для использования mpz_class в качестве ключа в unordered_map
 struct mpz_class_hash {
-  std::size_t operator()(const mpz_class &z) const {
-    return mpz_get_ui(z.get_mpz_t()) ^ mpz_sizeinbase(z.get_mpz_t(), 2);
-  }
+    std::size_t operator()(const mpz_class& z) const {
+        return mpz_get_ui(z.get_mpz_t()) ^ mpz_sizeinbase(z.get_mpz_t(), 2);
+    }
 };
 
 struct mpz_class_equal {
-  bool operator()(const mpz_class &lhs, const mpz_class &rhs) const {
-    return mpz_cmp(lhs.get_mpz_t(), rhs.get_mpz_t()) == 0;
-  }
+    bool operator()(const mpz_class& lhs, const mpz_class& rhs) const {
+        return mpz_cmp(lhs.get_mpz_t(), rhs.get_mpz_t()) == 0;
+    }
 };
 
 // Кэш для результатов проверки бесквадратности
-std::unordered_map<mpz_class, bool, mpz_class_hash, mpz_class_equal>
-    squarefree_cache;
+std::unordered_map<mpz_class, bool, mpz_class_hash, mpz_class_equal> squarefree_cache;
 std::shared_mutex cache_mutex; // Для многопоточного доступа к кэшу
 
 // Кэш для проверки простоты чисел
-std::unordered_map<mpz_class, bool, mpz_class_hash, mpz_class_equal>
-    prime_cache;
+std::unordered_map<mpz_class, bool, mpz_class_hash, mpz_class_equal> prime_cache;
 std::shared_mutex prime_cache_mutex;
 
 // Кэш для множителей
-std::unordered_map<mpz_class, mpz_class, mpz_class_hash, mpz_class_equal>
-    factor_cache;
+std::unordered_map<mpz_class, mpz_class, mpz_class_hash, mpz_class_equal> factor_cache;
 std::shared_mutex factor_cache_mutex;
 
 // Мьютекс для синхронизации вывода
@@ -51,93 +47,93 @@ std::atomic<int> cache_hits(0);
 
 // Функция для НОД
 mpz_class gcd(mpz_class a, mpz_class b) {
-  mpz_class result;
-  mpz_gcd(result.get_mpz_t(), a.get_mpz_t(), b.get_mpz_t());
-  return result;
+    mpz_class result;
+    mpz_gcd(result.get_mpz_t(), a.get_mpz_t(), b.get_mpz_t());
+    return result;
 }
 
 // Функция быстрого возведения в степень по модулю
-mpz_class powmod(mpz_class base, mpz_class exp, const mpz_class &mod) {
-  mpz_class result;
-  mpz_powm(result.get_mpz_t(), base.get_mpz_t(), exp.get_mpz_t(),
-           mod.get_mpz_t());
-  return result;
+mpz_class powmod(mpz_class base, mpz_class exp, const mpz_class& mod) {
+    mpz_class result;
+    mpz_powm(result.get_mpz_t(), base.get_mpz_t(), exp.get_mpz_t(), mod.get_mpz_t());
+    return result;
 }
 
 // Тест Миллера-Рабина на простоту с кэшированием
-bool is_prime(const mpz_class &n, int iterations = 20) {
-  if (n <= 1)
-    return false;
-  if (n <= 3)
-    return true;
-  if (n % 2 == 0)
-    return false;
+bool is_prime(const mpz_class& n, int iterations = 20) {
+    if (n <= 1)
+        return false;
+    if (n <= 3)
+        return true;
+    if (n % 2 == 0)
+        return false;
 
-  // Проверяем в кэше
-  {
-    std::shared_lock<std::shared_mutex> lock(prime_cache_mutex);
-    auto it = prime_cache.find(n);
-    if (it != prime_cache.end()) {
-      cache_hits++;
-      return it->second;
+    // Проверяем в кэше
+    {
+        std::shared_lock<std::shared_mutex> lock(prime_cache_mutex);
+        auto it = prime_cache.find(n);
+        if (it != prime_cache.end()) {
+            cache_hits++;
+            return it->second;
+        }
     }
-  }
 
-  // Представляем n - 1 как d * 2^r
-  mpz_class d = n - 1;
-  int r = 0;
-  while (d % 2 == 0) {
-    d /= 2;
-    r++;
-  }
+    // Представляем n - 1 как d * 2^r
+    mpz_class d = n - 1;
+    int r = 0;
+    while (d % 2 == 0) {
+        d /= 2;
+        r++;
+    }
 
-  // Используем встроенную функцию GMP для теста Миллера-Рабина
-  int is_prime_result = mpz_probab_prime_p(n.get_mpz_t(), iterations);
-  bool result = is_prime_result != 0;
-
-  // Кэшируем результат
-  {
-    std::unique_lock<std::shared_mutex> lock(prime_cache_mutex);
-    prime_cache[n] = result;
-  }
-
-  return result;
+    // Используем встроенную функцию GMP для теста Миллера-Рабина
+    int is_prime_result = mpz_probab_prime_p(n.get_mpz_t(), iterations);
+    bool result = is_prime_result != 0;
+    
+    // Кэшируем результат
+    {
+        std::unique_lock<std::shared_mutex> lock(prime_cache_mutex);
+        prime_cache[n] = result;
+    }
+    
+    return result;
 }
 
 // Ро-алгоритм Полларда для факторизации с кэшированием
-mpz_class pollard_rho(const mpz_class &n) {
-  if (n % 2 == 0)
-    return 2;
+mpz_class pollard_rho(const mpz_class& n) {
+    if (n % 2 == 0)
+        return 2;
+    
+    if (is_prime(n))
+        return n;
 
-  if (is_prime(n))
-    return n;
-
-  // Проверяем кэш множителей
-  {
-    std::shared_lock<std::shared_mutex> lock(factor_cache_mutex);
-    auto it = factor_cache.find(n);
-    if (it != factor_cache.end()) {
-      cache_hits++;
-      return it->second;
+    // Проверяем кэш множителей
+    {
+        std::shared_lock<std::shared_mutex> lock(factor_cache_mutex);
+        auto it = factor_cache.find(n);
+        if (it != factor_cache.end()) {
+            cache_hits++;
+            return it->second;
+        }
     }
-  }
 
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_int_distribution<int> dis(1, 100);
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<int> dis(1, 100);
 
-  mpz_class x = dis(gen);
-  mpz_class y = x;
-  mpz_class c = dis(gen);
-  mpz_class d = 1;
+    mpz_class x = dis(gen);
+    mpz_class y = x;
+    mpz_class c = dis(gen);
+    mpz_class d = 1;
 
-  // f(x) = x^2 + c mod n
-  auto f = [&](const mpz_class &x) {
-    mpz_class result = (x * x + c) % n;
-    return result;
-  };
+    // f(x) = x^2 + c mod n
+    auto f = [&](const mpz_class& x) {
+        mpz_class result = (x * x + c) % n;
+        return result;
+    };
 
-  int max_iterations = 10000; // Ограничение для
+    int max_iterations = 10000; // Ограничение для очень сложных факторизаций
+    int iterations = 0;
 
     while (d == 1 && iterations < max_iterations) {
         x = f(x);
